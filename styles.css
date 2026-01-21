@@ -1,54 +1,166 @@
-window.APP_CONFIG = {
-  timezone: "America/Guayaquil",
+:root{
+  --bg:#0b0f14;
+  --card:#111827;
+  --muted:#94a3b8;
+  --text:#e5e7eb;
+  --line:#243244;
+  --accent:#60a5fa;
+  --warn:#fbbf24;
+  --danger:#f87171;
+  --ok:#34d399;
+  --shadow: 0 10px 30px rgba(0,0,0,.35);
+  --r:14px;
+}
 
-  msal: {
-    clientId: "PEGA_AQUI_TU_CLIENT_ID",
-    tenantId: "PEGA_AQUI_TU_TENANT_ID",
-    // Scopes delegados recomendados para SharePoint/Excel:
-    scopes: ["User.Read", "Files.ReadWrite.All"]
-  },
+*{box-sizing:border-box}
+body{
+  margin:0;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
+  background:var(--bg);
+  color:var(--text);
+}
 
-  shareLinks: {
-    // Archivo lista de bloques (tu link):
-    blocks: "https://malimaec-my.sharepoint.com/:x:/g/personal/analistabi_malima_com/IQDomkop5tidRZDuKVqeMqCXAQyn8rpZgQi62-qeMqvAGtA?e=Adbu4H",
-    // Archivo base con tbl_muestras (tu link):
-    data: "https://malimaec-my.sharepoint.com/:x:/g/personal/analistabi_malima_com/IQChxrCEhJT6TYzm6DpTlIt0ASdRW7QAJ9q-Mx9-3TjxdDc?e=x6P7xR"
-  },
+.topbar{
+  display:flex;
+  gap:16px;
+  justify-content:space-between;
+  align-items:center;
+  padding:14px 18px;
+  border-bottom:1px solid var(--line);
+  position:sticky; top:0;
+  background:rgba(11,15,20,.92);
+  backdrop-filter: blur(10px);
+  z-index:10;
+}
+.brand__title{font-weight:700}
+.brand__sub{color:var(--muted); font-size:12px}
 
-  // Hoja donde están los bloques (usedRange)
-  blocksSheetName: "bloques",
+.container{max-width:1100px; margin:18px auto; padding:0 14px}
 
-  // Encabezados posibles (case-insensitive). Ajusta si tus columnas se llaman distinto.
-  blocksHeaderCandidates: {
-    bloque: ["bloque", "BLOQUE", "Bloque"],
-    estado: ["estado", "ESTADO", "Estado"]
-  },
+.card{
+  background:var(--card);
+  border:1px solid var(--line);
+  border-radius:var(--r);
+  padding:16px;
+  box-shadow: var(--shadow);
+  margin-bottom:14px;
+}
+.card__title{font-weight:700; margin-bottom:6px}
 
-  // Tablas en tu Excel "data"
-  tables: {
-    muestras: "tbl_muestras",
-    users: "tbl_users"
-  },
+.muted{color:var(--muted)}
+.small{font-size:12px}
 
-  // Defaults de N por modo (editable en UI)
-  defaults: {
-    nAltura: 16,
-    nCompleto: 120
-  },
+.btn{
+  background:var(--accent);
+  color:#081019;
+  border:0;
+  padding:10px 12px;
+  border-radius:12px;
+  font-weight:700;
+  cursor:pointer;
+}
+.btn:disabled{opacity:.6; cursor:not-allowed}
+.btn--ghost{
+  background:transparent;
+  color:var(--text);
+  border:1px solid var(--line);
+}
+.hidden{display:none !important}
 
-  // Validaciones Gypsophila (ajusta a tu realidad)
-  validation: {
-    altura_cm: { min: 5, max: 200 },
-    estructura_cm: { min: 1, max: 200 },
-    diametro_mm: { min: 0.5, max: 30 }
-  },
+.row{display:flex; gap:10px; align-items:center}
+.space-between{justify-content:space-between}
+.wrap{flex-wrap:wrap}
 
-  // Texto exacto para estado activo
-  estadoActivo: "ACTIVO",
+.grid2{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap:12px;
+}
+.grid3{
+  display:grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap:12px;
+}
+@media(max-width:900px){
+  .grid2,.grid3{grid-template-columns:1fr}
+}
 
-  // Mensajes
-  ui: {
-    appTitle: "Formulario de Muestreo"
-  }
-};
+label .label{font-size:12px; color:var(--muted); margin-bottom:6px}
+input, select{
+  width:100%;
+  background:#0b1220;
+  border:1px solid var(--line);
+  color:var(--text);
+  padding:10px 10px;
+  border-radius:12px;
+  outline:none;
+}
+input:focus, select:focus{border-color: var(--accent)}
+.hint{font-size:12px; color:var(--muted); margin-top:6px}
 
+.sep{border:0; border-top:1px solid var(--line); margin:14px 0}
+
+.warnbox{
+  border:1px solid rgba(251,191,36,.4);
+  background: rgba(251,191,36,.08);
+  padding:10px;
+  border-radius:12px;
+}
+.warnbox__title{font-weight:800; color:var(--warn)}
+.warnbox__text{color:var(--text); font-size:12px; margin-top:6px}
+
+.samples{
+  border:1px solid var(--line);
+  border-radius:12px;
+  overflow:hidden;
+}
+.samples__head{
+  display:flex;
+  gap:10px;
+  justify-content:space-between;
+  padding:10px 12px;
+  background:#0b1220;
+  border-bottom:1px solid var(--line);
+}
+.samples__grid{
+  display:grid;
+  grid-template-columns: 90px 1fr 1fr 1fr;
+  gap:10px;
+  padding:12px;
+}
+@media(max-width:900px){
+  .samples__grid{grid-template-columns: 70px 1fr 1fr 1fr}
+}
+.samples__cell{display:flex; flex-direction:column; gap:6px}
+.bad{border-color: rgba(248,113,113,.7) !important}
+
+.modal{
+  position:fixed; inset:0;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  z-index:999;
+}
+.modal__backdrop{
+  position:absolute; inset:0;
+  background: rgba(0,0,0,.6);
+}
+.modal__panel{
+  position:relative;
+  width:min(980px, 94vw);
+  max-height: 88vh;
+  overflow:auto;
+  background:var(--card);
+  border:1px solid var(--line);
+  border-radius:16px;
+  padding:16px;
+  box-shadow: var(--shadow);
+}
+.sessionItem{
+  border:1px solid var(--line);
+  border-radius:12px;
+  padding:10px;
+  margin-top:10px;
+}
+.sessionItem__id{font-weight:800}
+.sessionItem__meta{font-size:12px; color:var(--muted); margin-top:4px}
