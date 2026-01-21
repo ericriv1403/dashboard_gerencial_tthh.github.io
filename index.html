@@ -1,138 +1,146 @@
 <!doctype html>
 <html lang="es">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Formulario de Muestreo</title>
-  <link rel="stylesheet" href="styles.css" />
-
-  <!-- MSAL Browser (login Microsoft) -->
-  <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.20.0/lib/msal-browser.min.js"></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Formulario Muestreo</title>
+  <style>
+    :root{
+      --bg:#0b0f14; --card:#111827; --line:#243244; --text:#e5e7eb; --muted:#94a3b8;
+      --accent:#60a5fa; --ok:#34d399; --err:#f87171; --warn:#fbbf24;
+    }
+    body{font-family:Arial, sans-serif;margin:14px;background:var(--bg);color:var(--text)}
+    .card{max-width:1100px;margin:auto;border:1px solid var(--line);border-radius:14px;padding:14px;background:var(--card)}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+    @media(max-width:900px){.grid2,.grid3{grid-template-columns:1fr}}
+    label{display:block}
+    .lbl{font-size:12px;color:var(--muted);margin-bottom:6px}
+    input,select,button{width:100%;padding:10px;border-radius:12px;border:1px solid var(--line);background:#0b1220;color:var(--text);box-sizing:border-box}
+    button{cursor:pointer;font-weight:700}
+    .btn{background:var(--accent);color:#081019;border:0}
+    .ghost{background:transparent;border:1px solid var(--line);color:var(--text)}
+    .muted{color:var(--muted)}
+    .ok{color:var(--ok);font-weight:700}
+    .err{color:var(--err);font-weight:700}
+    .sep{border:0;border-top:1px solid var(--line);margin:12px 0}
+    table{width:100%;border-collapse:collapse;margin-top:10px}
+    th,td{border:1px solid var(--line);padding:8px;text-align:center}
+    th{background:#0b1220}
+    .bad{border-color:var(--err)!important}
+    .warnBox{border:1px solid rgba(251,191,36,.5);background:rgba(251,191,36,.08);padding:10px;border-radius:12px}
+    .hidden{display:none!important}
+    .pill{padding:4px 10px;border-radius:999px;border:1px solid var(--line);font-size:12px;color:var(--muted)}
+  </style>
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand">
-      <div class="brand__title">Formulario de Muestreo</div>
-      <div class="brand__sub">Excel Online (SharePoint) · Validaciones · Auditoría</div>
-    </div>
-    <div class="topbar__actions">
-      <button id="btnSignIn" class="btn">Iniciar sesión Microsoft</button>
-      <button id="btnSignOut" class="btn btn--ghost hidden">Salir</button>
-    </div>
-  </header>
+  <div class="card">
+    <h2>Registro de Muestreo (Google Sheets)</h2>
+    <div class="muted">PIN · Bloques ACTIVO · Validaciones · Duplicados · Reemplazo con auditoría</div>
 
-  <main class="container">
-    <section id="panelStatus" class="card">
-      <div class="card__title">Estado</div>
-      <div id="statusText" class="muted">Cargando…</div>
-      <div id="statusDetail" class="muted small"></div>
-    </section>
+    <div id="statusTop" class="muted" style="margin-top:10px"></div>
 
-    <section id="panelPin" class="card hidden">
-      <div class="card__title">Acceso por PIN</div>
+    <div id="loginBox" style="margin-top:14px">
+      <h3>1) Login</h3>
       <div class="grid2">
         <label>
-          <div class="label">User ID</div>
-          <input id="inpUserId" placeholder="m001" autocomplete="username" />
+          <div class="lbl">User ID</div>
+          <input id="user_id" placeholder="m001">
         </label>
         <label>
-          <div class="label">PIN</div>
-          <input id="inpPin" placeholder="******" inputmode="numeric" autocomplete="one-time-code" />
+          <div class="lbl">PIN</div>
+          <input id="pin" placeholder="******" inputmode="numeric" type="password">
         </label>
       </div>
-      <div class="row">
-        <button id="btnValidatePin" class="btn">Validar</button>
-        <div id="pinMsg" class="muted"></div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn" id="btnLogin">Ingresar</button>
+        <div id="loginMsg" class="muted"></div>
       </div>
-    </section>
+    </div>
 
-    <section id="panelForm" class="card hidden">
-      <div class="row space-between wrap">
-        <div>
-          <div class="card__title">Registro de muestras</div>
-          <div class="muted small" id="sessionInfo"></div>
+    <div id="appBox" class="hidden" style="margin-top:14px">
+      <div class="row" style="justify-content:space-between">
+        <div class="row" style="gap:8px;flex-wrap:wrap">
+          <span class="pill">Usuario: <b id="who"></b></span>
+          <span class="pill">Rol: <b id="role"></b></span>
+          <span class="pill">Fecha: <b id="fecha"></b></span>
         </div>
-        <div class="row wrap">
-          <button id="btnRefreshBlocks" class="btn btn--ghost">Recargar bloques</button>
-          <button id="btnAdmin" class="btn btn--ghost hidden">Administración</button>
+        <div class="row">
+          <button class="ghost" id="btnReloadBlocks">Recargar bloques</button>
+          <button class="ghost hidden" id="btnAdminToggle">Administración</button>
+          <button class="ghost" id="btnLogout">Salir</button>
         </div>
       </div>
 
-      <hr class="sep" />
+      <hr class="sep">
 
       <div class="grid2">
         <label>
-          <div class="label">Bloque (solo ACTIVO)</div>
-          <input id="inpBloque" list="dlBloques" placeholder="Escribe para buscar…" />
+          <div class="lbl">Bloque (solo ACTIVO)</div>
+          <input id="bloque" list="dlBloques" placeholder="Escribe para buscar…">
           <datalist id="dlBloques"></datalist>
-          <div class="hint" id="bloqueHint"></div>
+          <div class="muted" id="bloqueHint"></div>
         </label>
 
         <label>
-          <div class="label">Modo</div>
-          <select id="selModo">
+          <div class="lbl">Modo</div>
+          <select id="modo">
             <option value="ALTURA">ALTURA (solo altura)</option>
             <option value="COMPLETO">COMPLETO (altura + estructura + diámetro)</option>
           </select>
-          <div class="hint">El modo controla qué campos son obligatorios.</div>
+          <div class="muted" id="modoHint"></div>
         </label>
       </div>
 
-      <div class="grid3">
+      <div class="grid3" style="margin-top:10px">
         <label>
-          <div class="label">N muestras (editable)</div>
-          <input id="inpN" type="number" min="1" step="1" />
-          <div class="hint">Por defecto: ALTURA=16, COMPLETO=120 (configurable).</div>
+          <div class="lbl">N muestras (editable)</div>
+          <input id="n" type="number" min="1" step="1">
+          <div class="muted" id="nHint"></div>
         </label>
-
         <label>
-          <div class="label">Observación general (opcional)</div>
-          <input id="inpObs" placeholder="Ej: planta con daño…" />
-          <div class="hint">Si hay duplicado, se marcará automáticamente.</div>
+          <div class="lbl">Observación general (opcional)</div>
+          <input id="obs" placeholder="Ej: daño, anomalía…">
         </label>
-
-        <div class="warnbox hidden" id="dupBox">
-          <div class="warnbox__title">Advertencia de duplicado</div>
-          <div class="warnbox__text" id="dupText"></div>
+        <div id="dupBox" class="warnBox hidden">
+          <div><b style="color:var(--warn)">Advertencia de duplicado</b></div>
+          <div id="dupText" class="muted" style="margin-top:6px"></div>
         </div>
       </div>
 
-      <hr class="sep" />
+      <div class="row" style="margin-top:10px">
+        <button class="btn" id="btnBuild">Crear formulario</button>
+        <button class="ghost" id="btnClear">Limpiar</button>
+        <div id="msg" class="muted"></div>
+      </div>
 
-      <div id="samplesContainer"></div>
+      <div id="tableArea"></div>
 
-      <div class="row wrap">
-        <button id="btnSubmit" class="btn">Enviar a Excel</button>
-        <button id="btnClear" class="btn btn--ghost">Limpiar</button>
+      <div class="row" style="margin-top:10px">
+        <button class="btn" id="btnSubmit" disabled>Enviar</button>
         <div id="submitMsg" class="muted"></div>
       </div>
-    </section>
 
-    <!-- Modal Admin -->
-    <div id="adminModal" class="modal hidden">
-      <div class="modal__backdrop" id="adminBackdrop"></div>
-      <div class="modal__panel">
-        <div class="row space-between">
-          <div>
-            <div class="card__title">Administración</div>
-            <div class="muted small">Reemplazar una sesión sin borrar: los originales pasan a is_current=FALSE.</div>
-          </div>
-          <button id="btnAdminClose" class="btn btn--ghost">Cerrar</button>
+      <div id="finalMsg" class="muted" style="margin-top:8px"></div>
+
+      <!-- ADMIN PANEL -->
+      <div id="adminBox" class="hidden" style="margin-top:18px">
+        <hr class="sep">
+        <h3>Administración (ADMIN)</h3>
+        <div class="muted">
+          1) Buscar sesiones vigentes de HOY (is_current=TRUE) por bloque y modo.<br>
+          2) Cargar una sesión para editar (se prellenará el formulario).<br>
+          3) Enviar → reemplaza: viejas a FALSE y nuevas a TRUE (auditoría).
         </div>
 
-        <hr class="sep" />
-
-        <div class="grid3">
+        <div class="grid2" style="margin-top:10px">
           <label>
-            <div class="label">Fecha (local)</div>
-            <input id="admFecha" />
+            <div class="lbl">Bloque</div>
+            <input id="admBloque" list="dlBloques" placeholder="Bloque…">
           </label>
           <label>
-            <div class="label">Bloque</div>
-            <input id="admBloque" list="dlBloques" placeholder="Bloque…" />
-          </label>
-          <label>
-            <div class="label">Modo</div>
+            <div class="lbl">Modo</div>
             <select id="admModo">
               <option value="ALTURA">ALTURA</option>
               <option value="COMPLETO">COMPLETO</option>
@@ -140,23 +148,419 @@
           </label>
         </div>
 
-        <div class="row wrap">
-          <button id="btnAdmBuscar" class="btn">Buscar sesiones actuales</button>
+        <div class="row" style="margin-top:10px">
+          <button class="btn" id="btnFindSessions">Listar sesiones HOY</button>
           <div id="admMsg" class="muted"></div>
         </div>
 
-        <div id="admSessions"></div>
-
-        <hr class="sep" />
-
-        <div class="muted small">
-          Para reemplazar: selecciona una sesión encontrada → se cargará el formulario principal en “modo reemplazo”.
-        </div>
+        <div id="sessionsList"></div>
+        <div id="replaceHint" class="muted" style="margin-top:10px"></div>
       </div>
     </div>
-  </main>
+  </div>
 
-  <script src="config.js"></script>
-  <script src="app.js"></script>
+<script>
+  const $ = (id)=>document.getElementById(id);
+  const setText = (id, s)=>{ $(id).textContent = s || ""; };
+  const show = (id, yes)=>{ $(id).classList.toggle("hidden", !yes); };
+
+  let CFG = null;
+  let AUTH = { ok:false, user_id:"", pin:"", role:"" };
+  let ACTIVE_BLOCKS = [];
+
+  let CURRENT_MODE = "ALTURA";
+  let CURRENT_N = 0;
+
+  let REPLACE_OLD_SESSION = null; // admin replaces
+  let LOADED_SESSION = null; // for display
+
+  function call_(fn, ...args){
+    return new Promise((resolve, reject)=>{
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(err => reject(new Error(err?.message || err)))
+        [fn](...args);
+    });
+  }
+
+  function parseNum(x){
+    const s = String(x||"").trim().replace(",",".");
+    if(!s) return null;
+    const v = Number(s);
+    return Number.isFinite(v) ? v : null;
+  }
+  function inRange(v,r){ return (v!==null && v>=r.min && v<=r.max); }
+
+  function fillBlocksDatalist(list){
+    ACTIVE_BLOCKS = list || [];
+    const dl = $("dlBloques");
+    dl.innerHTML = "";
+    ACTIVE_BLOCKS.forEach(b=>{
+      const opt=document.createElement("option");
+      opt.value=b;
+      dl.appendChild(opt);
+    });
+    setText("bloqueHint", `${ACTIVE_BLOCKS.length} bloques ACTIVO cargados.`);
+  }
+
+  function updateHints(){
+    if(!CFG) return;
+    setText("modoHint", `ALTURA default=${CFG.defaults.nAltura} · COMPLETO default=${CFG.defaults.nCompleto}`);
+    setText("nHint", `Validaciones: altura [${CFG.validation.altura_cm.min}, ${CFG.validation.altura_cm.max}] cm · estructura [${CFG.validation.estructura_cm.min}, ${CFG.validation.estructura_cm.max}] cm · diámetro [${CFG.validation.diametro_mm.min}, ${CFG.validation.diametro_mm.max}] mm`);
+  }
+
+  function disableSubmitIfInvalid(){
+    const inputs = [...document.querySelectorAll("#tableArea input[data-field]")];
+    if(!inputs.length){ $("btnSubmit").disabled = true; return; }
+
+    for(const inp of inputs){
+      const field = inp.dataset.field;
+      const v = parseNum(inp.value);
+      const ok = inRange(v, CFG.validation[field]);
+      inp.classList.toggle("bad", inp.value && !ok);
+      if(!inp.value || !ok){ $("btnSubmit").disabled = true; return; }
+    }
+    $("btnSubmit").disabled = false;
+  }
+
+  function enablePasteFill(input, list){
+    input.addEventListener("paste", (ev)=>{
+      const text = (ev.clipboardData || window.clipboardData).getData("text");
+      if(!text || !text.includes("\n")) return;
+      ev.preventDefault();
+      const lines = text.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+      const start = list.indexOf(input);
+      for(let i=0;i<lines.length;i++){
+        const idx = start + i;
+        if(idx>=list.length) break;
+        list[idx].value = lines[i];
+        list[idx].dispatchEvent(new Event("input"));
+      }
+    });
+  }
+
+  function renderTable(mode, n, prefillSamples){
+    CURRENT_MODE = mode;
+    CURRENT_N = n;
+
+    const cols = (mode==="COMPLETO")
+      ? ["altura_cm","estructura_cm","diametro_mm"]
+      : ["altura_cm"];
+
+    let html = `<table><thead><tr><th>Muestra</th>`;
+    if(mode==="COMPLETO"){
+      html += `<th>Altura (cm)</th><th>Estructura (cm)</th><th>Diámetro (mm)</th>`;
+    } else {
+      html += `<th>Altura (cm)</th>`;
+    }
+    html += `</tr></thead><tbody>`;
+
+    for(let i=1;i<=n;i++){
+      html += `<tr><td>${i}</td>`;
+      for(const c of cols){
+        const val = prefillSamples?.[i-1]?.[c] ?? "";
+        html += `<td><input data-i="${i}" data-field="${c}" inputmode="decimal" placeholder="0" value="${String(val)}"></td>`;
+      }
+      html += `</tr>`;
+    }
+    html += `</tbody></table>`;
+    $("tableArea").innerHTML = html;
+
+    const inputs = [...document.querySelectorAll("#tableArea input[data-field]")];
+    const colMap = {};
+    for(const c of cols) colMap[c] = [];
+
+    inputs.forEach(inp=>{
+      colMap[inp.dataset.field].push(inp);
+      inp.addEventListener("input", disableSubmitIfInvalid);
+      inp.addEventListener("keydown", (e)=>{
+        if(e.key==="Enter"){
+          e.preventDefault();
+          const all = [...document.querySelectorAll("#tableArea input[data-field]")];
+          const idx = all.indexOf(inp);
+          if(idx>=0 && all[idx+1]) all[idx+1].focus();
+        }
+      });
+    });
+
+    // paste fill por columna
+    for(const c of cols){
+      colMap[c].forEach(inp => enablePasteFill(inp, colMap[c]));
+    }
+
+    disableSubmitIfInvalid();
+  }
+
+  async function loadBlocks(){
+    setText("msg","Cargando bloques…");
+    const r = await call_("api_get_blocks", AUTH.user_id, AUTH.pin);
+    if(!r.ok) throw new Error(r.error || "No se pudo cargar bloques.");
+    fillBlocksDatalist(r.bloques);
+    setText("msg","");
+  }
+
+  async function checkDup(){
+    const bloque = $("bloque").value.trim();
+    const modo = $("modo").value;
+    if(!bloque || !ACTIVE_BLOCKS.includes(bloque)) return;
+
+    const r = await call_("api_list_sessions_today", AUTH.user_id, AUTH.pin, bloque, modo);
+    if(!r.ok) return;
+
+    if(r.sessions && r.sessions.length){
+      show("dupBox", true);
+      setText("dupText", `Ya existe(n) ${r.sessions.length} sesión(es) vigentes HOY (${r.fecha}) para este bloque/modo. Se permitirá guardar, pero se marcará DUPLICADO.`);
+    } else {
+      show("dupBox", false);
+      setText("dupText", "");
+    }
+  }
+
+  function resetFormOnly(){
+    $("obs").value = "";
+    $("tableArea").innerHTML = "";
+    $("btnSubmit").disabled = true;
+    show("dupBox", false);
+    setText("submitMsg","");
+    setText("finalMsg","");
+  }
+
+  // ====== INIT ======
+  (async function init(){
+    try{
+      setText("statusTop","Inicializando…");
+      const d = await call_("api_defaults");
+      CFG = d;
+      updateHints();
+      const ping = await call_("api_ping");
+      setText("statusTop", `Servidor OK · TZ=${ping.tz}`);
+    } catch(e){
+      setText("statusTop", "Error inicializando: " + e.message);
+    }
+  })();
+
+  // ====== EVENTS ======
+  $("btnLogin").onclick = async ()=>{
+    try{
+      setText("loginMsg","Validando…");
+      const user_id = $("user_id").value.trim();
+      const pin = $("pin").value.trim();
+      const r = await call_("api_auth", user_id, pin);
+      if(!r.ok){ setText("loginMsg", r.error || "Login inválido."); return; }
+
+      AUTH = { ok:true, user_id, pin, role: r.user.role };
+      setText("loginMsg","OK.");
+
+      show("loginBox", false);
+      show("appBox", true);
+
+      setText("who", AUTH.user_id);
+      setText("role", AUTH.role);
+      const today = new Date().toLocaleDateString("es-EC");
+      setText("fecha", today);
+
+      // defaults N
+      $("modo").value = "ALTURA";
+      $("n").value = CFG.defaults.nAltura;
+
+      // Admin toggle
+      show("btnAdminToggle", AUTH.role === "admin");
+
+      await loadBlocks();
+      await checkDup();
+
+    } catch(e){
+      setText("loginMsg", e.message);
+    }
+  };
+
+  $("btnLogout").onclick = ()=> location.reload();
+
+  $("btnReloadBlocks").onclick = async ()=>{
+    try{ await loadBlocks(); } catch(e){ alert(e.message); }
+  };
+
+  $("modo").onchange = async ()=>{
+    const modo = $("modo").value;
+    $("n").value = (modo === "COMPLETO") ? CFG.defaults.nCompleto : CFG.defaults.nAltura;
+    REPLACE_OLD_SESSION = null;
+    LOADED_SESSION = null;
+    resetFormOnly();
+    await checkDup();
+  };
+
+  $("bloque").onchange = async ()=>{
+    REPLACE_OLD_SESSION = null;
+    LOADED_SESSION = null;
+    resetFormOnly();
+    await checkDup();
+  };
+
+  $("btnBuild").onclick = async ()=>{
+    const bloque = $("bloque").value.trim();
+    const modo = $("modo").value;
+    const n = Math.floor(Number($("n").value));
+
+    if(!ACTIVE_BLOCKS.includes(bloque)){ setText("msg","Bloque inválido/no ACTIVO."); return; }
+    if(!Number.isFinite(n) || n<1){ setText("msg","N inválido."); return; }
+
+    setText("msg","");
+    renderTable(modo, n, null);
+    await checkDup();
+  };
+
+  $("btnClear").onclick = ()=>{
+    $("bloque").value = "";
+    $("modo").value = "ALTURA";
+    $("n").value = CFG.defaults.nAltura;
+    REPLACE_OLD_SESSION = null;
+    LOADED_SESSION = null;
+    resetFormOnly();
+  };
+
+  $("btnSubmit").onclick = async ()=>{
+    try{
+      setText("submitMsg","Validando…");
+      const bloque = $("bloque").value.trim();
+      const modo = $("modo").value;
+      const n = Math.floor(Number($("n").value));
+      const obs = $("obs").value.trim();
+
+      if(!ACTIVE_BLOCKS.includes(bloque)) throw new Error("Bloque no ACTIVO.");
+      if(!["ALTURA","COMPLETO"].includes(modo)) throw new Error("Modo inválido.");
+      if(!Number.isFinite(n) || n<1) throw new Error("N inválido.");
+      if(!CURRENT_N) throw new Error("Primero crea el formulario.");
+
+      // Construir samples
+      const samples = [];
+      for(let i=1;i<=n;i++){
+        const altura = parseNum(document.querySelector(`#tableArea input[data-i="${i}"][data-field="altura_cm"]`)?.value);
+        if(!inRange(altura, CFG.validation.altura_cm)) throw new Error(`Altura inválida en muestra ${i}`);
+
+        let estructura = "";
+        let diametro = "";
+        if(modo==="COMPLETO"){
+          estructura = parseNum(document.querySelector(`#tableArea input[data-i="${i}"][data-field="estructura_cm"]`)?.value);
+          diametro   = parseNum(document.querySelector(`#tableArea input[data-i="${i}"][data-field="diametro_mm"]`)?.value);
+          if(!inRange(estructura, CFG.validation.estructura_cm)) throw new Error(`Estructura inválida en muestra ${i}`);
+          if(!inRange(diametro,   CFG.validation.diametro_mm))   throw new Error(`Diámetro inválido en muestra ${i}`);
+        }
+
+        samples.push({ altura_cm: altura, estructura_cm: estructura, diametro_mm: diametro });
+      }
+
+      // Reemplazo admin (si aplica)
+      if(REPLACE_OLD_SESSION){
+        setText("submitMsg","Reemplazando sesión (auditoría)…");
+        const r = await call_("api_replace_session", AUTH.user_id, AUTH.pin, {
+          old_session_id: REPLACE_OLD_SESSION,
+          bloque, modo, n,
+          observacion: obs,
+          samples
+        });
+        if(!r.ok) throw new Error(r.error || "Error reemplazando.");
+
+        setText("submitMsg", `OK reemplazo. Nueva sesión=${r.session_id_new}. Reemplazadas=${r.replacedCount}. Insertadas=${r.inserted}.`);
+        setText("finalMsg", `Auditoría: old_session_id pasó a is_current=FALSE y replaced_session_id=${r.session_id_new}.`);
+        REPLACE_OLD_SESSION = null;
+        LOADED_SESSION = null;
+        return;
+      }
+
+      // Submit normal
+      setText("submitMsg","Enviando…");
+      const r = await call_("api_submit", AUTH.user_id, AUTH.pin, {
+        bloque, modo, n,
+        observacion: obs,
+        samples
+      });
+      if(!r.ok) throw new Error(r.error || "Error guardando.");
+
+      let msg = `OK. session_id=${r.session_id}. Filas=${n}.`;
+      if(r.duplicate_warning) msg += " (DUPLICADO marcado)";
+      setText("submitMsg", msg);
+      setText("finalMsg", r.duplicate_warning ? "Advertencia: guardado como DUPLICADO." : "");
+
+      // limpiar tabla para siguiente captura
+      $("tableArea").innerHTML = "";
+      $("btnSubmit").disabled = true;
+
+    } catch(e){
+      setText("submitMsg", "Error: " + e.message);
+    }
+  };
+
+  // Admin
+  $("btnAdminToggle").onclick = ()=>{
+    $("adminBox").classList.toggle("hidden");
+    setText("admMsg","");
+    $("sessionsList").innerHTML = "";
+    setText("replaceHint","");
+  };
+
+  $("btnFindSessions").onclick = async ()=>{
+    try{
+      setText("admMsg","Buscando…");
+      const bloque = $("admBloque").value.trim();
+      const modo = $("admModo").value;
+      if(!ACTIVE_BLOCKS.includes(bloque)){ setText("admMsg","Bloque inválido/no ACTIVO."); return; }
+
+      const r = await call_("api_list_sessions_today", AUTH.user_id, AUTH.pin, bloque, modo);
+      if(!r.ok) throw new Error(r.error || "Error.");
+
+      const box = $("sessionsList");
+      box.innerHTML = "";
+      if(!r.sessions.length){
+        setText("admMsg","No hay sesiones vigentes hoy para ese bloque/modo.");
+        return;
+      }
+      setText("admMsg", `Sesiones hoy (${r.fecha}): ${r.sessions.length}`);
+
+      r.sessions.forEach(s=>{
+        const div = document.createElement("div");
+        div.className = "warnBox";
+        div.style.marginTop = "10px";
+        div.innerHTML = `
+          <div><b>${s.session_id}</b></div>
+          <div class="muted" style="margin-top:6px">filas=${s.count}</div>
+          <div class="row" style="margin-top:10px">
+            <button class="btn">Cargar para editar y reemplazar</button>
+          </div>
+        `;
+        div.querySelector("button").onclick = async ()=>{
+          setText("replaceHint","Cargando sesión…");
+          const g = await call_("api_get_session", AUTH.user_id, AUTH.pin, s.session_id);
+          if(!g.ok) throw new Error(g.error || "No se pudo cargar sesión.");
+
+          LOADED_SESSION = g.session;
+          REPLACE_OLD_SESSION = g.session.session_id;
+
+          // Prellenar formulario principal
+          $("bloque").value = g.session.bloque;
+          $("modo").value = g.session.modo;
+          $("n").value = g.session.n;
+          $("obs").value = `REEMPLAZO de ${g.session.session_id}`;
+
+          // Construir prefill para render
+          const prefill = g.session.samples.map(x => ({
+            altura_cm: x.altura_cm ?? "",
+            estructura_cm: x.estructura_cm ?? "",
+            diametro_mm: x.diametro_mm ?? ""
+          }));
+
+          renderTable(g.session.modo, g.session.n, prefill);
+          await checkDup();
+
+          setText("replaceHint", `Modo REEMPLAZO activo: al enviar se reemplazará ${g.session.session_id} (viejas FALSE, nuevas TRUE).`);
+        };
+
+        box.appendChild(div);
+      });
+
+    } catch(e){
+      setText("admMsg", "Error: " + e.message);
+    }
+  };
+</script>
 </body>
 </html>
