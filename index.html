@@ -1,12 +1,162 @@
 <!doctype html>
 <html lang="es">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Hola Mundo - GitHub Pages</title>
-  </head>
-  <body>
-    <h1>Hola mundo</h1>
-    <p>Si ves esto, GitHub Pages está funcionando.</p>
-  </body>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Formulario de Muestreo</title>
+  <link rel="stylesheet" href="styles.css" />
+
+  <!-- MSAL Browser (login Microsoft) -->
+  <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.20.0/lib/msal-browser.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand__title">Formulario de Muestreo</div>
+      <div class="brand__sub">Excel Online (SharePoint) · Validaciones · Auditoría</div>
+    </div>
+    <div class="topbar__actions">
+      <button id="btnSignIn" class="btn">Iniciar sesión Microsoft</button>
+      <button id="btnSignOut" class="btn btn--ghost hidden">Salir</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <section id="panelStatus" class="card">
+      <div class="card__title">Estado</div>
+      <div id="statusText" class="muted">Cargando…</div>
+      <div id="statusDetail" class="muted small"></div>
+    </section>
+
+    <section id="panelPin" class="card hidden">
+      <div class="card__title">Acceso por PIN</div>
+      <div class="grid2">
+        <label>
+          <div class="label">User ID</div>
+          <input id="inpUserId" placeholder="m001" autocomplete="username" />
+        </label>
+        <label>
+          <div class="label">PIN</div>
+          <input id="inpPin" placeholder="******" inputmode="numeric" autocomplete="one-time-code" />
+        </label>
+      </div>
+      <div class="row">
+        <button id="btnValidatePin" class="btn">Validar</button>
+        <div id="pinMsg" class="muted"></div>
+      </div>
+    </section>
+
+    <section id="panelForm" class="card hidden">
+      <div class="row space-between wrap">
+        <div>
+          <div class="card__title">Registro de muestras</div>
+          <div class="muted small" id="sessionInfo"></div>
+        </div>
+        <div class="row wrap">
+          <button id="btnRefreshBlocks" class="btn btn--ghost">Recargar bloques</button>
+          <button id="btnAdmin" class="btn btn--ghost hidden">Administración</button>
+        </div>
+      </div>
+
+      <hr class="sep" />
+
+      <div class="grid2">
+        <label>
+          <div class="label">Bloque (solo ACTIVO)</div>
+          <input id="inpBloque" list="dlBloques" placeholder="Escribe para buscar…" />
+          <datalist id="dlBloques"></datalist>
+          <div class="hint" id="bloqueHint"></div>
+        </label>
+
+        <label>
+          <div class="label">Modo</div>
+          <select id="selModo">
+            <option value="ALTURA">ALTURA (solo altura)</option>
+            <option value="COMPLETO">COMPLETO (altura + estructura + diámetro)</option>
+          </select>
+          <div class="hint">El modo controla qué campos son obligatorios.</div>
+        </label>
+      </div>
+
+      <div class="grid3">
+        <label>
+          <div class="label">N muestras (editable)</div>
+          <input id="inpN" type="number" min="1" step="1" />
+          <div class="hint">Por defecto: ALTURA=16, COMPLETO=120 (configurable).</div>
+        </label>
+
+        <label>
+          <div class="label">Observación general (opcional)</div>
+          <input id="inpObs" placeholder="Ej: planta con daño…" />
+          <div class="hint">Si hay duplicado, se marcará automáticamente.</div>
+        </label>
+
+        <div class="warnbox hidden" id="dupBox">
+          <div class="warnbox__title">Advertencia de duplicado</div>
+          <div class="warnbox__text" id="dupText"></div>
+        </div>
+      </div>
+
+      <hr class="sep" />
+
+      <div id="samplesContainer"></div>
+
+      <div class="row wrap">
+        <button id="btnSubmit" class="btn">Enviar a Excel</button>
+        <button id="btnClear" class="btn btn--ghost">Limpiar</button>
+        <div id="submitMsg" class="muted"></div>
+      </div>
+    </section>
+
+    <!-- Modal Admin -->
+    <div id="adminModal" class="modal hidden">
+      <div class="modal__backdrop" id="adminBackdrop"></div>
+      <div class="modal__panel">
+        <div class="row space-between">
+          <div>
+            <div class="card__title">Administración</div>
+            <div class="muted small">Reemplazar una sesión sin borrar: los originales pasan a is_current=FALSE.</div>
+          </div>
+          <button id="btnAdminClose" class="btn btn--ghost">Cerrar</button>
+        </div>
+
+        <hr class="sep" />
+
+        <div class="grid3">
+          <label>
+            <div class="label">Fecha (local)</div>
+            <input id="admFecha" />
+          </label>
+          <label>
+            <div class="label">Bloque</div>
+            <input id="admBloque" list="dlBloques" placeholder="Bloque…" />
+          </label>
+          <label>
+            <div class="label">Modo</div>
+            <select id="admModo">
+              <option value="ALTURA">ALTURA</option>
+              <option value="COMPLETO">COMPLETO</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="row wrap">
+          <button id="btnAdmBuscar" class="btn">Buscar sesiones actuales</button>
+          <div id="admMsg" class="muted"></div>
+        </div>
+
+        <div id="admSessions"></div>
+
+        <hr class="sep" />
+
+        <div class="muted small">
+          Para reemplazar: selecciona una sesión encontrada → se cargará el formulario principal en “modo reemplazo”.
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
 </html>
