@@ -19,7 +19,10 @@ import streamlit as st
 # 0) TÍTULOS / TEXTOS
 # =============================================================================
 APP_TITLE = "Panel RRHH (Limpio)"
-APP_SUBTITLE = "Existencias • Salidas • (1 - Supervivencia 30 días) + Meta (promedio 3 últimos registros del año pasado)"
+APP_SUBTITLE = (
+    "Existencias • Salidas • KPI robusto: Deserción 30D Estandarizada (Edad×Antigüedad) "
+    "+ Promedio móvil (3) + Meta (promedio 3 últimos registros del año pasado)"
+)
 
 LBL_SHOW_FILTERS = "Mostrar panel (cargar datos / filtros / opciones)"
 LBL_VIEW_PICK = "Vista"
@@ -66,6 +69,7 @@ LBL_OPT_DESC_DATASET = "Dataset descriptivo"
 LBL_OPT_DESC_DATASET_1 = "Existencias (snapshot)"
 LBL_OPT_DESC_DATASET_2 = "Salidas (en rango)"
 LBL_OPT_DESC_VAR_PICK = "Variable a describir"
+LBL_OPT_EXIT_SHARE_VAR = "Salidas como % del total de existencias (elige variable)"
 
 # Mensajes
 MSG_NEED_DATA = "Carga datos y define rango/filtros para ver el panel."
@@ -257,7 +261,7 @@ def apply_bar_labels(fig, show_labels: bool, orientation: str = "v") -> go.Figur
 def apply_line_labels(fig: go.Figure, show_labels: bool) -> go.Figure:
     if not show_labels:
         return fig
-    # Para que no sea un “chorizo”, etiqueta solo el último punto de cada serie
+    # etiqueta solo el último punto de cada serie lineal
     for tr in fig.data:
         if getattr(tr, "mode", "") and "lines" in tr.mode:
             x = tr.x
@@ -390,7 +394,7 @@ def validate_and_prepare_hist(df_raw: pd.DataFrame) -> pd.DataFrame:
 
 
 # =============================================================================
-# Intervalos por persona (para existencias diarias)
+# Intervalos por persona (para existencias diarias y KPI)
 # =============================================================================
 @st.cache_data(show_spinner=False)
 def merge_intervals_per_person(df: pd.DataFrame) -> pd.DataFrame:
@@ -760,21 +764,70 @@ def aggregate_daily_to_period_simple(df_daily: pd.DataFrame, period: str) -> pd.
 
 
 # =============================================================================
-# Métrica pedida: 1 - Supervivencia a 30 días (proporción simple)
-# - Cohorte por periodo: spells con ini dentro de la ventana y con follow-up completo (ini <= cut_today - 30)
+# KPI ROBUSTO NUEVO: DS30-STD (Deserción 30D estandarizada Edad×Antigüedad)
+# - Riesgo: activos en el CUT del periodo
+# - Evento: fin real dentro de (cut, cut+30]
+# - Estandarización: pesos fijos w_s (baseline año pasado, sin filtros)
 # =============================================================================
+def _make_stratum(active: pd.DataFrame, cut: pd.Timestamp) -> pd.DataFrame:
+    a = active.copy()
+    a["ref"] = pd.Timestamp(cut).normalize()
+    a["tenure_days"] = (a["ref"] - a["ini"]).dt.days
+    a["Antigüedad"] = bucket_antiguedad(a["tenure_days"])
+    a["Edad"] = bucket_edad_from_dob(a["fnac"], a["ref"])
+    a["Estrato"] = a["Edad"].astype(str) + " | " + a["Antigüedad"].astype(str)
+    return a
+
 @st.cache_data(show_spinner=False)
-def compute_desercion30_by_period(
-    df_events: pd.DataFrame,
+def compute_standard_weights_from_baseline(
+    df_events_baseline: pd.DataFrame,
+    period: str,
+    ref_start: pd.Timestamp,
+    ref_end: pd.Timestamp,
+) -> pd.DataFrame:
+    # pesos w_s = composición acumulada de snapshots en baseline
+    if df_events_baseline is None or df_events_baseline.empty:
+        return pd.DataFrame(columns=["Estrato", "w"])
+
+    df_int = merge_intervals_per_person(df_events_baseline)
+    windows = build_period_windows(ref_start, ref_end, period)
+    if windows.empty:
+        return pd.DataFrame(columns=["Estrato", "w"])
+
+    acc: Dict[str, int] = {}
+    for _, w in windows.iterrows():
+        cut = pd.Timestamp(w["cut"]).normalize()
+        active = df_int[(df_int["ini"] <= cut) & (df_int["fin_eff"] >= cut)].copy()
+        if active.empty:
+            continue
+        active = active.sort_values(["cod", "ini"]).groupby("cod", as_index=False).tail(1).copy()
+        active = _make_stratum(active, cut)
+        cts = active.groupby("Estrato")["cod"].nunique()
+        for k, v in cts.items():
+            acc[k] = acc.get(k, 0) + int(v)
+
+    if not acc:
+        return pd.DataFrame(columns=["Estrato", "w"])
+
+    w = pd.DataFrame({"Estrato": list(acc.keys()), "count": list(acc.values())})
+    w["w"] = w["count"] / float(w["count"].sum())
+    return w[["Estrato", "w"]].sort_values("w", ascending=False).reset_index(drop=True)
+
+@st.cache_data(show_spinner=False)
+def compute_ds30_std_by_period(
+    df_events_filtered: pd.DataFrame,
     start: pd.Timestamp,
     end: pd.Timestamp,
     period: str,
     cut_today: pd.Timestamp,
+    weights: pd.DataFrame,
     H_days: int = 30,
+    min_base: int = 30,
 ) -> pd.DataFrame:
-    if df_events.empty:
+    if df_events_filtered is None or df_events_filtered.empty:
         return pd.DataFrame()
 
+    df_int = merge_intervals_per_person(df_events_filtered)
     windows = build_period_windows(start, end, period).copy()
     if windows.empty:
         return pd.DataFrame()
@@ -782,51 +835,87 @@ def compute_desercion30_by_period(
     ct = pd.Timestamp(cut_today).normalize()
     H = int(H_days)
 
+    wdf = weights.copy() if weights is not None else pd.DataFrame(columns=["Estrato", "w"])
+    if not wdf.empty:
+        wdf = wdf.dropna(subset=["Estrato", "w"]).copy()
+        wdf["Estrato"] = wdf["Estrato"].astype(str)
+        wdf["w"] = pd.to_numeric(wdf["w"], errors="coerce")
+
     rows = []
     for _, w in windows.iterrows():
-        ws = pd.Timestamp(w["window_start"]).normalize()
-        we = pd.Timestamp(w["window_end"]).normalize()
+        cut = pd.Timestamp(w["cut"]).normalize()
+        flag_incomplete = bool((cut + pd.Timedelta(days=H)) > ct)
 
-        cohort = df_events[(df_events["ini"] >= ws) & (df_events["ini"] <= we)].copy()
-        if cohort.empty:
+        active = df_int[(df_int["ini"] <= cut) & (df_int["fin_eff"] >= cut)].copy()
+        if active.empty:
             rows.append({
                 "Periodo": w["Periodo"],
-                "cut": w["cut"],
-                "cohort_n": 0,
-                "surv30": np.nan,
-                "kpi_desercion30": np.nan,
+                "cut": cut,
+                "N": 0,
+                "E": 0,
+                "DS30_raw": np.nan,
+                "DS30_std": np.nan,
+                "coverage_w": 0.0,
+                "flag_incomplete_30d": flag_incomplete,
+                "flag_base_baja": True,
             })
             continue
 
-        # follow-up completo
-        cohort = cohort[cohort["ini"] <= (ct - pd.Timedelta(days=H))].copy()
-        n = int(len(cohort))
-        if n <= 0:
-            rows.append({
-                "Periodo": w["Periodo"],
-                "cut": w["cut"],
-                "cohort_n": 0,
-                "surv30": np.nan,
-                "kpi_desercion30": np.nan,
-            })
-            continue
+        active = active.sort_values(["cod", "ini"]).groupby("cod", as_index=False).tail(1).copy()
+        active = _make_stratum(active, cut)
 
-        # sobrevivió si sigue activo al día ini+H (fin_eff >= ini+H)
-        survived = (cohort["fin_eff"] >= (cohort["ini"] + pd.Timedelta(days=H))).sum()
-        surv = float(survived) / float(n) if n > 0 else np.nan
-        kpi = 1.0 - surv if pd.notna(surv) else np.nan
+        # Evento en 30 días: fin real en (cut, cut+H]
+        active["evento_30d"] = (~active["fin"].isna()) & (active["fin"] > cut) & (active["fin"] <= (cut + pd.Timedelta(days=H)))
+
+        N = int(active["cod"].nunique())
+        E = int(active.loc[active["evento_30d"], "cod"].nunique())
+        ds_raw = (float(E) / float(N)) if N > 0 else np.nan
+
+        # Estándar: p_s por estrato
+        tab = active.groupby("Estrato").agg(
+            N_s=("cod", "nunique"),
+            E_s=("evento_30d", "sum"),
+        ).reset_index()
+        tab["p_s"] = np.where(tab["N_s"] > 0, tab["E_s"] / tab["N_s"], np.nan)
+
+        ds_std = np.nan
+        coverage = 0.0
+        if (wdf is not None) and (not wdf.empty):
+            j = wdf.merge(tab[["Estrato", "p_s"]], on="Estrato", how="left")
+            # cobertura de pesos disponibles (estratos presentes con p_s observado)
+            mask = ~j["p_s"].isna() & ~j["w"].isna()
+            coverage = float(j.loc[mask, "w"].sum()) if mask.any() else 0.0
+            if coverage > 0:
+                ds_std = float((j.loc[mask, "w"] * j.loc[mask, "p_s"]).sum() / coverage)
+        else:
+            # sin pesos: usa raw (no estandariza)
+            ds_std = ds_raw
+            coverage = 1.0 if pd.notna(ds_raw) else 0.0
+
+        flag_base_baja = bool(N < int(min_base))
+
+        # si es incompleto, dejamos NaN (para no engañar la tendencia)
+        if flag_incomplete:
+            ds_raw_out = np.nan
+            ds_std_out = np.nan
+        else:
+            ds_raw_out = ds_raw
+            ds_std_out = ds_std
 
         rows.append({
             "Periodo": w["Periodo"],
-            "cut": w["cut"],
-            "cohort_n": n,
-            "surv30": surv,
-            "kpi_desercion30": kpi,
+            "cut": cut,
+            "N": N,
+            "E": E,
+            "DS30_raw": ds_raw_out,
+            "DS30_std": ds_std_out,
+            "coverage_w": coverage,
+            "flag_incomplete_30d": flag_incomplete,
+            "flag_base_baja": flag_base_baja,
         })
 
     out = pd.DataFrame(rows).sort_values("cut").reset_index(drop=True)
     return out
-
 
 def meta_from_last_year_last3(df_metric: pd.DataFrame, end_dt: pd.Timestamp, value_col: str) -> float:
     if df_metric is None or df_metric.empty or value_col not in df_metric.columns:
@@ -863,18 +952,60 @@ def counts_topn_with_otros(s: pd.Series, topn: int = 10) -> pd.DataFrame:
     df = pd.concat([df, pd.DataFrame([{"Categoria": "OTROS", "N": int(otros)}])], ignore_index=True)
     return df
 
+def _topn_otros_multi(df: pd.DataFrame, cat_col: str, sort_col: str, topn: int) -> pd.DataFrame:
+    d = df.copy()
+    d[cat_col] = d[cat_col].fillna(MISSING_LABEL).astype(str)
+    d = d.sort_values(sort_col, ascending=False)
+    if len(d) <= topn:
+        return d
+    top = d.head(topn).copy()
+    rest = d.iloc[topn:].copy()
+    agg = {c: "sum" for c in d.columns if c != cat_col}
+    otros = rest.agg(agg).to_dict()
+    otros[cat_col] = "OTROS"
+    out = pd.concat([top, pd.DataFrame([otros])], ignore_index=True)
+    return out
 
 def bar_and_pie(df_counts: pd.DataFrame, title: str, show_labels: bool, topn: int) -> Tuple[go.Figure, go.Figure]:
-    # Barra horizontal
     d = df_counts.copy()
     d = d.sort_values("N", ascending=True)
     figb = px.bar(d, x="N", y="Categoria", orientation="h", title=title)
     figb = apply_bar_labels(figb, show_labels, orientation="h")
 
-    # Pastel
     figp = px.pie(df_counts, names="Categoria", values="N", title=title)
     figp.update_traces(textinfo="label+percent" if show_labels else "percent")
     return figb, figp
+
+def compute_exit_share_of_total_existences(
+    df_now: pd.DataFrame,
+    df_exit: pd.DataFrame,
+    dim_col: str,
+    topn: int,
+    total_exist_base: float,
+) -> pd.DataFrame:
+    if df_exit is None or df_exit.empty:
+        return pd.DataFrame(columns=["Categoria", "Salidas", "PctTotalExist", "ExistSnapshot", "TasaSobreArea"])
+    if df_now is None or df_now.empty or total_exist_base is None or (isinstance(total_exist_base, float) and np.isnan(total_exist_base)) or total_exist_base <= 0:
+        total_exist_base = float(len(df_now)) if (df_now is not None) else np.nan
+
+    ex = df_exit.copy()
+    ex[dim_col] = ex[dim_col].fillna(MISSING_LABEL).astype(str)
+    # salidas por categoría (personas únicas)
+    g_exit = ex.groupby(dim_col)["cod"].nunique().rename("Salidas").reset_index().rename(columns={dim_col: "Categoria"})
+
+    now = df_now.copy()
+    now[dim_col] = now[dim_col].fillna(MISSING_LABEL).astype(str)
+    g_now = now.groupby(dim_col)["cod"].nunique().rename("ExistSnapshot").reset_index().rename(columns={dim_col: "Categoria"})
+
+    d = g_exit.merge(g_now, on="Categoria", how="left")
+    d["ExistSnapshot"] = d["ExistSnapshot"].fillna(0).astype(int)
+
+    d["PctTotalExist"] = (d["Salidas"] / float(total_exist_base)) * 100.0 if total_exist_base and total_exist_base > 0 else np.nan
+    d["TasaSobreArea"] = np.where(d["ExistSnapshot"] > 0, (d["Salidas"] / d["ExistSnapshot"]) * 100.0, np.nan)
+
+    d = _topn_otros_multi(d, cat_col="Categoria", sort_col="Salidas", topn=topn)
+    d = d.sort_values("PctTotalExist", ascending=True).reset_index(drop=True)
+    return d
 
 
 # =============================================================================
@@ -1023,6 +1154,8 @@ if show_filters:
                 "period_label": period_label,
                 "snap_dt": snap_dt,
                 "cut_today": cut_today,
+                "min_date": min_date,
+                "max_date": max_date,
             }
 
         # -------------------------
@@ -1114,12 +1247,22 @@ if show_filters:
                 key="opt_desc_vars",
             )
 
+            # Variable extra para gráfico "salidas como % del total existencias"
+            default_share = st.session_state.get("opt_exit_share_var", "Área General")
+            exit_share_var = st.selectbox(
+                LBL_OPT_EXIT_SHARE_VAR,
+                options=list(desc_vars_catalog.keys()),
+                index=list(desc_vars_catalog.keys()).index(default_share) if default_share in desc_vars_catalog else 0,
+                key="opt_exit_share_var",
+            )
+
             st.session_state["__opts__"] = {
                 "unique_personas_por_dia": unique_personas_por_dia,
                 "show_labels": show_labels,
                 "topn": topn,
                 "desc_vars": desc_vars,
                 "desc_vars_catalog": desc_vars_catalog,
+                "exit_share_var": exit_share_var,
             }
 
 
@@ -1143,12 +1286,16 @@ with (col_main if hasattr(col_main, "__enter__") else st.container()):
     period_label = g["period_label"]
     snap_dt = g["snap_dt"]
     cut_today = g["cut_today"]
+    min_date = g["min_date"]
+    max_date = g["max_date"]
 
     unique_personas_por_dia = bool(opts["unique_personas_por_dia"])
     show_labels = bool(opts["show_labels"])
     topn = int(opts["topn"])
     desc_vars = list(opts["desc_vars"])
     desc_vars_catalog = dict(opts["desc_vars_catalog"])
+    exit_share_var = str(opts.get("exit_share_var", "Área General"))
+    exit_share_col = desc_vars_catalog.get(exit_share_var, "area_gen")
 
     # 1) Filtros categóricos
     df0_f = apply_categorical_filters(df0, fs)
@@ -1182,37 +1329,64 @@ with (col_main if hasattr(col_main, "__enter__") else st.container()):
 
         df_period = aggregate_daily_to_period_simple(df_daily, period)
 
-    # 3) KPI: 1 - supervivencia 30 días (por periodo) + MA3 (rango actual)
+    # 3) KPI NUEVO: DS30-STD + MA3 + Meta + Etiquetas/flags
     H_DAYS = 30
-    with st.spinner("Calculando (1 - supervivencia 30 días) + meta..."):
-        kpi_period = compute_desercion30_by_period(
-            df_events=df0_f,
-            start=start_dt,
-            end=end_dt,
-            period=period,
-            cut_today=cut_today,
-            H_days=H_DAYS,
-        )
+    MIN_BASE_KPI = 30
 
-        # MA3 (solo para suavizar la serie visible)
-        kpi_period = kpi_period.sort_values("cut").reset_index(drop=True)
-        kpi_period["MA3"] = kpi_period["kpi_desercion30"].rolling(window=3, min_periods=1).mean()
-
-        # Meta = promedio de los últimos 3 registros del AÑO PASADO (baseline = sin filtros)
+    with st.spinner("Calculando KPI robusto (Deserción 30D estandarizada) + meta..."):
+        # Baseline (año pasado completo, sin filtros) para pesos w_s
         last_year = int(end_dt.year) - 1
         base_start = pd.Timestamp(date(last_year, 1, 1))
         base_end = pd.Timestamp(date(last_year, 12, 31))
 
-        kpi_base = compute_desercion30_by_period(
-            df_events=df0,               # baseline SIN filtros
+        # Ajuste a límites del dataset (por si faltan fechas)
+        if pd.notna(min_date):
+            base_start = max(base_start, pd.Timestamp(min_date).normalize())
+        if pd.notna(max_date):
+            base_end = min(base_end, pd.Timestamp(max_date).normalize())
+
+        weights = compute_standard_weights_from_baseline(
+            df_events_baseline=df0,  # SIN filtros
+            period=period,
+            ref_start=base_start,
+            ref_end=base_end,
+        )
+
+        # KPI para el rango actual (CON filtros) usando pesos fijos
+        kpi_period = compute_ds30_std_by_period(
+            df_events_filtered=df0_f,
+            start=start_dt,
+            end=end_dt,
+            period=period,
+            cut_today=cut_today,
+            weights=weights,
+            H_days=H_DAYS,
+            min_base=MIN_BASE_KPI,
+        )
+
+        # MA3 sobre DS30_std (solo para suavizar lo visible)
+        kpi_period = kpi_period.sort_values("cut").reset_index(drop=True)
+        kpi_period["MA3"] = kpi_period["DS30_std"].rolling(window=3, min_periods=1).mean()
+
+        # Serie baseline para meta (mismo KPI estandarizado) en el año pasado
+        kpi_base = compute_ds30_std_by_period(
+            df_events_filtered=df0,  # SIN filtros
             start=base_start,
             end=base_end,
             period=period,
             cut_today=cut_today,
+            weights=weights,
             H_days=H_DAYS,
+            min_base=MIN_BASE_KPI,
         )
-        meta_val = meta_from_last_year_last3(kpi_base, end_dt=end_dt, value_col="kpi_desercion30")
+        meta_val = meta_from_last_year_last3(kpi_base, end_dt=end_dt, value_col="DS30_std")
         kpi_period["Meta"] = meta_val
+
+        # Etiquetas de estado (temporal)
+        kpi_period["flag_text"] = ""
+        kpi_period.loc[kpi_period["flag_incomplete_30d"] == True, "flag_text"] = "INCOMPLETO 30D"
+        kpi_period.loc[(kpi_period["flag_text"] == "") & (kpi_period["flag_base_baja"] == True), "flag_text"] = f"BASE BAJA (<{MIN_BASE_KPI})"
+        kpi_period.loc[(kpi_period["flag_text"] == "") & (kpi_period["coverage_w"] < 0.6), "flag_text"] = "COBERTURA < 60%"
 
     # =============================================================================
     # VIEW 1: DASHBOARD
@@ -1224,34 +1398,57 @@ with (col_main if hasattr(col_main, "__enter__") else st.container()):
         total_salidas = float(df_period["Salidas"].sum()) if not df_period.empty else 0.0
         exist_prom_rango = float(np.nanmean(df_period["Existencias_Prom"].values)) if not df_period.empty else np.nan
 
-        kpi_last = kpi_period.dropna(subset=["kpi_desercion30"]).tail(1)
-        last_kpi = float(kpi_last["kpi_desercion30"].iloc[0]) if not kpi_last.empty else np.nan
-        last_surv = 1.0 - last_kpi if pd.notna(last_kpi) else np.nan
+        kpi_last = kpi_period.dropna(subset=["DS30_std"]).tail(1)
+        last_ds30 = float(kpi_last["DS30_std"].iloc[0]) if not kpi_last.empty else np.nan
+        last_surv30 = (1.0 - last_ds30) if pd.notna(last_ds30) else np.nan
 
         k1, k2, k3 = st.columns(3, gap="large")
         k1.metric("Salidas (total en rango)", fmt_int_es(total_salidas))
         k2.metric("Existencias promedio (rango)", fmt_es(exist_prom_rango, 1))
-        k3.metric(f"Supervivencia 30 días (último periodo)", "-" if np.isnan(last_surv) else f"{last_surv*100:.1f}%".replace(".", ","))
+        k3.metric(f"Supervivencia 30D (último periodo, std)", "-" if np.isnan(last_surv30) else f"{last_surv30*100:.1f}%".replace(".", ","))
 
-        # ---- Gráfico 1: KPI deserción 30 + MA3 + Meta (roja)
-        st.markdown("### KPI: **1 - Supervivencia a 30 días** (Deserción 30d)")
-        if kpi_period["kpi_desercion30"].dropna().empty:
-            st.info("No hay cohortes con follow-up completo (ini <= hoy-30) en el rango.")
+        # ---- Gráfico 1: KPI DS30_std + MA3 + Meta + Etiquetas
+        st.markdown("### KPI: **Deserción 30D Estandarizada (Edad×Antigüedad)**")
+
+        if kpi_period["DS30_std"].dropna().empty:
+            st.info("No hay periodos con follow-up completo (cut+30 <= hoy) y/o base suficiente con los filtros actuales.")
         else:
             fig = go.Figure()
+
+            # Serie KPI principal (std)
             fig.add_trace(go.Scatter(
                 x=kpi_period["Periodo"].astype(str),
-                y=kpi_period["kpi_desercion30"],
+                y=kpi_period["DS30_std"],
                 mode="lines+markers",
-                name="Deserción 30d",
+                name="DS30-STD",
+                customdata=np.stack([
+                    kpi_period["N"].fillna(0).astype(float),
+                    kpi_period["E"].fillna(0).astype(float),
+                    kpi_period["coverage_w"].fillna(0.0).astype(float),
+                    kpi_period["DS30_raw"].astype(float),
+                    kpi_period["flag_text"].astype(str),
+                ], axis=1),
+                hovertemplate=(
+                    "<b>Periodo</b>: %{x}<br>"
+                    "<b>DS30-STD</b>: %{y:.2%}<br>"
+                    "<b>N activos (cut)</b>: %{customdata[0]:.0f}<br>"
+                    "<b>E salen <=30d</b>: %{customdata[1]:.0f}<br>"
+                    "<b>DS30-RAW</b>: %{customdata[3]:.2%}<br>"
+                    "<b>Cobertura pesos</b>: %{customdata[2]:.0%}<br>"
+                    "<b>Nota</b>: %{customdata[4]}<extra></extra>"
+                ),
             ))
+
+            # MA3
             fig.add_trace(go.Scatter(
                 x=kpi_period["Periodo"].astype(str),
                 y=kpi_period["MA3"],
                 mode="lines",
                 name="Promedio móvil (3)",
+                hovertemplate="<b>Periodo</b>: %{x}<br><b>MA3</b>: %{y:.2%}<extra></extra>",
             ))
 
+            # Meta
             if pd.notna(meta_val):
                 fig.add_trace(go.Scatter(
                     x=kpi_period["Periodo"].astype(str),
@@ -1259,15 +1456,35 @@ with (col_main if hasattr(col_main, "__enter__") else st.container()):
                     mode="lines",
                     name="Meta (promedio 3 últimos registros del año pasado)",
                     line=dict(color="red", dash="dash"),
+                    hovertemplate="<b>Meta</b>: %{y:.2%}<extra></extra>",
                 ))
+
+            # Etiquetas/flags visibles en la temporal (solo en puntos con alerta)
+            if show_labels:
+                mask_flag = (kpi_period["flag_text"].astype(str) != "") & (~kpi_period["Periodo"].isna())
+                if mask_flag.any():
+                    y_flag = kpi_period.loc[mask_flag, "DS30_std"].copy()
+                    # si justo está NaN (por incompleto), lo ponemos cerca de meta o cero para poder mostrar etiqueta
+                    fallback_y = (meta_val if pd.notna(meta_val) else 0.01)
+                    y_flag = y_flag.fillna(fallback_y)
+                    fig.add_trace(go.Scatter(
+                        x=kpi_period.loc[mask_flag, "Periodo"].astype(str),
+                        y=y_flag,
+                        mode="markers+text",
+                        text=kpi_period.loc[mask_flag, "flag_text"].astype(str),
+                        textposition="top center",
+                        showlegend=False,
+                        hoverinfo="skip",
+                    ))
 
             fig.update_yaxes(tickformat=".0%", range=[0, 1])
             fig.update_layout(
-                title="Deserción 30d + Promedio móvil (3) + Meta",
+                title="Deserción 30D Estandarizada + Promedio móvil (3) + Meta",
                 legend=dict(orientation="h"),
                 margin=dict(b=80),
             )
             fig = nice_xaxis(fig)
+            # etiqueta final de cada línea
             fig = apply_line_labels(fig, show_labels)
             st.plotly_chart(fig, use_container_width=True)
 
@@ -1293,6 +1510,7 @@ with (col_main if hasattr(col_main, "__enter__") else st.container()):
                     y=df_period["Existencias_Prom"].astype(float),
                     mode="lines+markers",
                     name="Existencias (promedio)",
+                    hovertemplate="<b>Periodo</b>: %{x}<br><b>Existencias prom</b>: %{y:.1f}<extra></extra>",
                 ),
                 secondary_y=True,
             )
@@ -1307,16 +1525,17 @@ with (col_main if hasattr(col_main, "__enter__") else st.container()):
             fig2 = apply_line_labels(fig2, show_labels)
             st.plotly_chart(fig2, use_container_width=True)
 
-        # ---- Descargas (limpias)
+        # ---- Descargas
         with st.expander("Descargar (Excel) / Ver datos base", expanded=False):
             buf = io.BytesIO()
             with pd.ExcelWriter(buf, engine="openpyxl") as writer:
                 df_daily.to_excel(writer, index=False, sheet_name="Diario")
                 df_period.to_excel(writer, index=False, sheet_name="Periodo")
-                kpi_period.to_excel(writer, index=False, sheet_name="KPI_Desercion30")
+                kpi_period.to_excel(writer, index=False, sheet_name="KPI_DS30_STD")
                 df_sal_det.to_excel(writer, index=False, sheet_name="Salidas_Detalle")
+                weights.to_excel(writer, index=False, sheet_name="Pesos_Estrato")
             st.download_button(
-                "Descargar Excel (Diario + Periodo + KPI + Salidas Detalle)",
+                "Descargar Excel (Diario + Periodo + KPI + Salidas Detalle + Pesos)",
                 data=buf.getvalue(),
                 file_name="rrhh_panel_limpio.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1324,11 +1543,11 @@ with (col_main if hasattr(col_main, "__enter__") else st.container()):
                 key="dl_panel_limpio",
             )
 
-            st.caption("Vista rápida (solo para auditoría, no es el foco del panel).")
-            st.dataframe(_safe_table_for_streamlit(df_period), use_container_width=True, height=260)
+            st.caption("Vista rápida (solo para auditoría).")
+            st.dataframe(_safe_table_for_streamlit(kpi_period.tail(30)), use_container_width=True, height=260)
 
     # =============================================================================
-    # VIEW 2: DESCRIPTIVOS (BARRAS + PASTEL) — DINÁMICO
+    # VIEW 2: DESCRIPTIVOS (BARRAS + PASTEL) — + gráfico % del total existencias
     # =============================================================================
     else:
         st.subheader("Descriptivos (Existencias & Salidas)")
@@ -1341,7 +1560,7 @@ with (col_main if hasattr(col_main, "__enter__") else st.container()):
             df_now["antig_dias"] = (df_now["ref"] - df_now["ini"]).dt.days
             df_now["Antigüedad"] = bucket_antiguedad(df_now["antig_dias"])
             df_now["Edad"] = bucket_edad_from_dob(df_now["fnac"], df_now["ref"])
-            # aplicar buckets como filtro también (si están activos)
+            # aplicar buckets como filtro también
             if fs.antig:
                 df_now = df_now[df_now["Antigüedad"].isin(fs.antig)]
             if fs.edad:
@@ -1349,13 +1568,11 @@ with (col_main if hasattr(col_main, "__enter__") else st.container()):
 
         # ---- Dataset Salidas (en rango) ya lo tenemos: df_sal_det
         df_exit = df_sal_det.copy() if df_sal_det is not None else pd.DataFrame()
-        # df_sal_det ya incluye Antigüedad y Edad calculados
 
-        # KPIs
+        # KPIs descriptivos
         c1, c2, c3 = st.columns(3, gap="large")
         c1.metric("Existencias (snapshot)", fmt_int_es(len(df_now)) if df_now is not None else "0")
         c2.metric("Salidas (rango)", fmt_int_es(len(df_exit)) if df_exit is not None else "0")
-        # ratio simple
         ratio = (len(df_exit) / len(df_now)) if (df_now is not None and len(df_now) > 0 and df_exit is not None) else np.nan
         c3.metric("Salidas / Existencias (simple)", "-" if np.isnan(ratio) else f"{ratio*100:.1f}%".replace(".", ","))
 
@@ -1372,7 +1589,7 @@ with (col_main if hasattr(col_main, "__enter__") else st.container()):
             st.info(MSG_NO_DATA_FOR_VIEW)
             st.stop()
 
-        # Variables seleccionadas (dinámico) -> se pintan todas las que elijas
+        # Variables seleccionadas (dinámico)
         if not desc_vars:
             st.info("Selecciona al menos 1 variable en Opciones → Variables descriptivas.")
             st.stop()
@@ -1381,10 +1598,6 @@ with (col_main if hasattr(col_main, "__enter__") else st.container()):
         for friendly in desc_vars:
             col = desc_vars_catalog.get(friendly)
             if col is None or col not in dset.columns:
-                continue
-
-            # Enriquecer labels si es Edad/Antigüedad pero no existe (por si dataset)
-            if col in ("Edad", "Antigüedad") and col not in dset.columns:
                 continue
 
             df_counts = counts_topn_with_otros(dset[col], topn=topn)
@@ -1397,6 +1610,64 @@ with (col_main if hasattr(col_main, "__enter__") else st.container()):
                 st.plotly_chart(b, use_container_width=True)
             with right:
                 st.plotly_chart(p, use_container_width=True)
+
+        # ---------------------------------------------------------------------
+        # NUEVO GRÁFICO: Salidas como % del total de existencias (del grupo filtrado)
+        # - Numerador: salidas por categoría (rango)
+        # - Denominador: existencias promedio del rango (más estable que snapshot)
+        # ---------------------------------------------------------------------
+        st.markdown("### Salidas como % del total de existencias (del grupo filtrado)")
+
+        total_exist_base = float(np.nanmean(df_period["Existencias_Prom"].values)) if (df_period is not None and not df_period.empty) else float(len(df_now))
+        if np.isnan(total_exist_base) or total_exist_base <= 0:
+            total_exist_base = float(len(df_now))
+
+        if df_exit is None or df_exit.empty:
+            st.info("No hay salidas en el rango para graficar proporciones.")
+        else:
+            if exit_share_col not in df_exit.columns:
+                st.info("No se pudo construir el gráfico: la variable seleccionada no existe en el dataset de salidas.")
+            else:
+                dshare = compute_exit_share_of_total_existences(
+                    df_now=df_now if df_now is not None else pd.DataFrame(),
+                    df_exit=df_exit,
+                    dim_col=exit_share_col,
+                    topn=topn,
+                    total_exist_base=total_exist_base,
+                )
+                if dshare.empty:
+                    st.info("No hay datos suficientes para el gráfico de proporciones.")
+                else:
+                    figx = px.bar(
+                        dshare,
+                        x="PctTotalExist",
+                        y="Categoria",
+                        orientation="h",
+                        title=f"{exit_share_var}: Salidas como % del total de existencias (base = existencias promedio del rango)",
+                        hover_data={
+                            "Salidas": True,
+                            "ExistSnapshot": True,
+                            "TasaSobreArea": ":.2f",
+                            "PctTotalExist": ":.2f",
+                        },
+                    )
+                    figx.update_xaxes(title_text="% del total de existencias (promedio rango)")
+                    figx.update_traces(
+                        hovertemplate=(
+                            "<b>%{y}</b><br>"
+                            "<b>Salidas</b>: %{customdata[0]:.0f}<br>"
+                            "<b>% Total existencias</b>: %{x:.2f}%<br>"
+                            "<b>Existencias snapshot</b>: %{customdata[1]:.0f}<br>"
+                            "<b>Tasa sobre su área</b>: %{customdata[2]:.2f}%<extra></extra>"
+                        )
+                    )
+                    figx = apply_bar_labels(figx, show_labels, orientation="h")
+                    st.plotly_chart(figx, use_container_width=True)
+
+                    st.caption(
+                        f"Base usada: Existencias promedio del rango = {fmt_es(total_exist_base,1)}. "
+                        "En el hover también ves la tasa sobre su propia área (Salidas/ExistSnapshot)."
+                    )
 
         # Descarga snapshot/salidas
         with st.expander("Descargar datasets descriptivos (Excel)", expanded=False):
