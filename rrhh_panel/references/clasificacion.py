@@ -8,7 +8,7 @@ CLAS_REF: Dict[str, str] = {
     "AGR": "TRABAJADOR AGRÍCOLA",
     "CHOFER": "CHOFER",
     "OCAS": "TRABAJADOR AGRÍCOLA OCASIONAL",
-    "PAS": "PASANTÍA",
+    "PAS": "PASANTE",
     "PRACT": "PRACTICANTES",
     "SP": "SERVICIOS PRESTADOS",
 }
