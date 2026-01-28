@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import httpx
 from zai import ZaiClient
 
@@ -8,8 +9,10 @@ from rrhh_panel.utils.secrets import get_secret
 def get_zai_client() -> ZaiClient:
     api_key = get_secret("ZAI_API_KEY")
     base_url = get_secret("ZAI_BASE_URL", "https://api.z.ai/api/paas/v4/")
+
     if not api_key:
-        raise RuntimeError("Falta ZAI_API_KEY. Configúrala en .streamlit/secrets.toml.")
+        raise RuntimeError("Falta ZAI_API_KEY. Configúrala en Streamlit Cloud → Secrets.")
+
     return ZaiClient(
         api_key=api_key,
         base_url=base_url,
