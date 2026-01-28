@@ -12,9 +12,7 @@ def render_floating_chat(context_summary: str = "") -> None:
     if "chat_open" not in st.session_state:
         st.session_state.chat_open = False
 
-    # -------------------------
     # Botón flotante (launcher)
-    # -------------------------
     launcher = st.container()
     with launcher:
         if st.button("💬", key="chat_launcher", help="Abrir / cerrar asistente"):
@@ -24,13 +22,11 @@ def render_floating_chat(context_summary: str = "") -> None:
     # ABAJO-IZQUIERDA
     launcher.float("bottom: 1.25rem; left: 1.25rem; width: 3.25rem; z-index: 9999;")
 
-    # Si está cerrado, salimos (evita panel no definido)
+    # Si cerrado, salir (evita panel no definido)
     if not st.session_state.chat_open:
         return
 
-    # -------------------------
-    # Panel flotante (chat)
-    # -------------------------
+    # Panel flotante
     panel = st.container()
     with panel:
         h1, h2, h3 = st.columns([1, 6, 1])
@@ -46,7 +42,6 @@ def render_floating_chat(context_summary: str = "") -> None:
         st.divider()
         render_chat(context_summary=context_summary)
 
-    # ABAJO-IZQUIERDA (panel encima del botón)
     panel.float(
         "bottom: 5rem; left: 1.25rem; width: 380px; "
         "background-color: rgba(255,255,255,0.98); padding: 0.75rem; "
